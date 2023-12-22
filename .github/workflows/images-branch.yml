@@ -51,6 +51,7 @@ jobs:
       fail-fast: false
       matrix:
         suite:
+          - { name: azuredevops_tasks, ecosystem: azuredevops-tasks }
           - { name: bundler, ecosystem: bundler }
           - { name: cargo, ecosystem: cargo }
           - { name: composer, ecosystem: composer }

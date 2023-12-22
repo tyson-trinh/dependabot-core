@@ -58,6 +58,7 @@ module Dependabot
       private
 
       PACKAGE_MANAGER_LOOKUP = T.let({
+        "azuredevops-tasks" => "azuredevops_tasks",
         "bundler" => "bundler",
         "cargo" => "cargo",
         "composer" => "composer",

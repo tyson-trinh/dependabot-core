@@ -18,6 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         suite:
+          - { path: azuredevops_tasks, name: azuredevops_tasks, ecosystem: azuredevops-tasks }
           - { path: bundler, name: bundler1, ecosystem: bundler }
           - { path: bundler, name: bundler2, ecosystem: bundler }
           - { path: cargo, name: cargo, ecosystem: cargo }

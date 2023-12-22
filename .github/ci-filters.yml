@@ -5,6 +5,9 @@ shared: &shared
   - 'updater/Gemfil*'
   - 'omnibus/**'
   - '.github/workflows/ci.yml'
+azuredevops_tasks:
+  - *shared
+  - 'azuredevops_tasks/**'
 bundler:
   - *shared
   - 'bundler/**'

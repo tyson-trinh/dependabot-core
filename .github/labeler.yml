@@ -1,3 +1,7 @@
+"L: azuredevops:tasks":
+- changed-files:
+  - any-glob-to-any-file: azuredevops_tasks/**
+
 "L: ruby:bundler":
 - changed-files:
   - any-glob-to-any-file: bundler/**

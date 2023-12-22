@@ -19,6 +19,7 @@
 #   ruby bin/dry-run.rb go_modules zonedb/zonedb
 #
 # Package managers:
+# - azuredevops_tasks
 # - bundler
 # - pip (includes pipenv)
 # - npm_and_yarn
@@ -48,6 +49,7 @@ unless Etc.getpwuid(Process.uid).name == "dependabot" || ENV["ALLOW_DRY_RUN_STAN
   exit 1
 end
 
+$LOAD_PATH << "./azuredevops_tasks/lib"
 $LOAD_PATH << "./bundler/lib"
 $LOAD_PATH << "./cargo/lib"
 $LOAD_PATH << "./common/lib"
@@ -88,6 +90,7 @@ require "dependabot/pull_request_creator"
 require "dependabot/config/file_fetcher"
 require "dependabot/simple_instrumentor"
 
+require "dependabot/azuredevops_tasks"
 require "dependabot/bundler"
 require "dependabot/cargo"
 require "dependabot/composer"

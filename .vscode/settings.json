@@ -5,5 +5,6 @@
   "jest.pathToJest": "${workspaceFolder}/npm_and_yarn/helpers/node_modules/.bin/jest",
   "jest.pathToConfig": "${workspaceFolder}/npm_and_yarn/helpers/jest.config.js",
   "sorbet.enabled": true,
-  "dotnet.defaultSolution": "nuget/helpers/lib/NuGetUpdater/NuGetUpdater.sln"
+  "dotnet.defaultSolution": "nuget/helpers/lib/NuGetUpdater/NuGetUpdater.sln",
+  "sarif-viewer.connectToGithubCodeScanning": "off"
 }
