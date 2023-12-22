@@ -2,6 +2,7 @@
 
 source "https://rubygems.org"
 
+gemspec path: "../azuredevops_tasks"
 gemspec path: "../bundler"
 gemspec path: "../cargo"
 gemspec path: "../common"

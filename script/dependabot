@@ -5,6 +5,7 @@ dependabot \
   -v "$(pwd)"/updater/bin:/home/dependabot/dependabot-updater/bin \
   -v "$(pwd)"/updater/lib:/home/dependabot/dependabot-updater/lib \
   -v "$(pwd)"/bin:/home/dependabot/bin \
+  -v "$(pwd)"/azuredevops_tasks:/home/dependabot/azuredevops_tasks \
   -v "$(pwd)"/bundler:/home/dependabot/bundler \
   -v "$(pwd)"/cargo:/home/dependabot/cargo \
   -v "$(pwd)"/common:/home/dependabot/common \

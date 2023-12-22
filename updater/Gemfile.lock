@@ -1,4 +1,10 @@
 PATH
+  remote: ../azuredevops_tasks
+  specs:
+    dependabot-azuredevops_tasks (0.238.0)
+      dependabot-common (= 0.238.0)
+
+PATH
   remote: ../bundler
   specs:
     dependabot-bundler (0.238.0)
@@ -325,6 +331,7 @@ PLATFORMS
 
 DEPENDENCIES
   debug (~> 1.8.0)
+  dependabot-azuredevops_tasks!
   dependabot-bundler!
   dependabot-cargo!
   dependabot-common!

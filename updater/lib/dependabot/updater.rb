@@ -29,6 +29,7 @@ require "dependabot/npm_and_yarn"
 require "dependabot/bundler"
 require "dependabot/pub"
 require "dependabot/swift"
+require "dependabot/azuredevops_tasks"
 
 # Updater components
 require "dependabot/updater/error_handler"

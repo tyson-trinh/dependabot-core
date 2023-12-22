@@ -119,6 +119,12 @@ docker run --rm -ti \
   -v "$(pwd)/.rubocop.yml:$CODE_DIR/.rubocop.yml" \
   -v "$(pwd)/.ruby-version:$CODE_DIR/.ruby-version" \
   -v "$(pwd)/bin:$CODE_DIR/bin" \
+  -v "$(pwd)/azuredevops_tasks/.rubocop.yml:$CODE_DIR/azuredevops_tasks/.rubocop.yml" \
+  -v "$(pwd)/azuredevops_tasks/Gemfile:$CODE_DIR/azuredevops_tasks/Gemfile" \
+  -v "$(pwd)/azuredevops_tasks/dependabot-azuredevops_tasks.gemspec:$CODE_DIR/azuredevops_tasks/dependabot-azuredevops_tasks.gemspec" \
+  -v "$(pwd)/azuredevops_tasks/lib:$CODE_DIR/azuredevops_tasks/lib" \
+  -v "$(pwd)/azuredevops_tasks/script:$CODE_DIR/azuredevops_tasks/script" \
+  -v "$(pwd)/azuredevops_tasks/spec:$CODE_DIR/azuredevops_tasks/spec" \
   -v "$(pwd)/bundler/.rubocop.yml:$CODE_DIR/bundler/.rubocop.yml" \
   -v "$(pwd)/bundler/Gemfile:$CODE_DIR/bundler/Gemfile" \
   -v "$(pwd)/bundler/dependabot-bundler.gemspec:$CODE_DIR/bundler/dependabot-bundler.gemspec" \
