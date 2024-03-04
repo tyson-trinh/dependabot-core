@@ -16,7 +16,7 @@ Gem::Specification.new do |spec|
   spec.license      = common_gemspec.license
 
   spec.metadata = {
-    "issue_tracker_uri" => common_gemspec.metadata["issue_tracker_uri"],
+    "bug_tracker_uri" => common_gemspec.metadata["bug_tracker_uri"],
     "changelog_uri" => common_gemspec.metadata["changelog_uri"]
   }
 
@@ -28,8 +28,6 @@ Gem::Specification.new do |spec|
   spec.files        = Dir["lib/**/*"]
 
   spec.add_dependency "dependabot-common", Dependabot::VERSION
-
-  spec.add_development_dependency "webrick", ">= 1.7"
 
   common_gemspec.development_dependencies.each do |dep|
     spec.add_development_dependency dep.name, *dep.requirement.as_list

@@ -15,7 +15,7 @@ Gem::Specification.new do |spec|
   spec.license      = common_gemspec.license
 
   spec.metadata = {
-    "issue_tracker_uri" => common_gemspec.metadata["issue_tracker_uri"],
+    "bug_tracker_uri" => common_gemspec.metadata["bug_tracker_uri"],
     "changelog_uri" => common_gemspec.metadata["changelog_uri"]
   }
 
@@ -30,6 +30,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "dependabot-cargo", Dependabot::VERSION
   spec.add_dependency "dependabot-common", Dependabot::VERSION
   spec.add_dependency "dependabot-composer", Dependabot::VERSION
+  spec.add_dependency "dependabot-devcontainers", Dependabot::VERSION
   spec.add_dependency "dependabot-docker", Dependabot::VERSION
   spec.add_dependency "dependabot-elm", Dependabot::VERSION
   spec.add_dependency "dependabot-github_actions", Dependabot::VERSION
@@ -42,6 +43,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "dependabot-nuget", Dependabot::VERSION
   spec.add_dependency "dependabot-pub", Dependabot::VERSION
   spec.add_dependency "dependabot-python", Dependabot::VERSION
+  spec.add_dependency "dependabot-swift", Dependabot::VERSION
   spec.add_dependency "dependabot-terraform", Dependabot::VERSION
 
   common_gemspec.development_dependencies.each do |dep|

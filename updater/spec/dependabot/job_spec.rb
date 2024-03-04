@@ -1,8 +1,11 @@
+# typed: false
 # frozen_string_literal: true
 
 require "spec_helper"
 require "dependabot/job"
 require "dependabot/dependency"
+require "support/dummy_package_manager/dummy"
+
 require "dependabot/bundler"
 
 RSpec.describe Dependabot::Job do
@@ -10,7 +13,7 @@ RSpec.describe Dependabot::Job do
 
   let(:attributes) do
     {
-      id: 1,
+      id: "1",
       token: "token",
       dependencies: dependencies,
       allowed_updates: allowed_updates,
@@ -21,7 +24,7 @@ RSpec.describe Dependabot::Job do
       source: {
         "provider" => "github",
         "repo" => "dependabot-fixtures/dependabot-test-ruby-package",
-        "directory" => "/",
+        "directory" => directory,
         "api-endpoint" => "https://api.github.com/",
         "hostname" => "github.com",
         "branch" => nil
@@ -32,7 +35,7 @@ RSpec.describe Dependabot::Job do
         "username" => "x-access-token",
         "password" => "github-token"
       }],
-      lockfile_only: false,
+      lockfile_only: lockfile_only,
       requirements_update_strategy: nil,
       update_subdependencies: false,
       updating_a_pull_request: false,
@@ -40,13 +43,16 @@ RSpec.describe Dependabot::Job do
       experiments: experiments,
       commit_message_options: commit_message_options,
       security_updates_only: security_updates_only,
-      dependency_groups: dependency_groups
+      dependency_groups: dependency_groups,
+      repo_private: repo_private
     }
   end
 
+  let(:directory) { "/" }
   let(:dependencies) { nil }
   let(:security_advisories) { [] }
   let(:package_manager) { "bundler" }
+  let(:lockfile_only) { false }
   let(:security_updates_only) { false }
   let(:allowed_updates) do
     [
@@ -64,15 +70,16 @@ RSpec.describe Dependabot::Job do
   let(:commit_message_options) { nil }
   let(:vendor_dependencies) { false }
   let(:dependency_groups) { [] }
+  let(:repo_private) { false }
 
   describe "::new_update_job" do
     let(:job_json) { fixture("jobs/job_with_credentials.json") }
 
     let(:new_update_job) do
       described_class.new_update_job(
-        job_id: anything,
+        job_id: "1",
         job_definition: JSON.parse(job_json),
-        repo_contents_path: anything
+        repo_contents_path: "repo"
       )
     end
 
@@ -88,9 +95,36 @@ RSpec.describe Dependabot::Job do
       expect(ruby_credential.keys).not_to include("token")
     end
 
-    it "will register its dependency groups" do
-      expect_any_instance_of(described_class).to receive(:register_dependency_groups)
-      new_update_job
+    context "when the directory does not start with a slash" do
+      let(:directory) { "hello" }
+
+      it "adds a slash to the directory" do
+        expect(job.source.directory).to eq("/hello")
+      end
+    end
+
+    context "when the directory uses relative path notation" do
+      let(:directory) { "hello/world/.." }
+
+      it "cleans the path" do
+        expect(job.source.directory).to eq("/hello")
+      end
+    end
+
+    context "when the directory is nil because it's a grouped security update" do
+      let(:directory) { nil }
+
+      it "doesn't raise an error" do
+        expect(job.source.directory).to eq(nil)
+      end
+    end
+  end
+
+  context "when lockfile_only is passed as true" do
+    let(:lockfile_only) { true }
+
+    it "infers a lockfile_only requirements_update_strategy" do
+      expect(subject.requirements_update_strategy).to eq("lockfile_only")
     end
   end
 
@@ -291,12 +325,12 @@ RSpec.describe Dependabot::Job do
     end
 
     context "with dev dependencies during a security update while allowed: production is in effect" do
-      let(:package_manager) { "npm_and_yarn" }
+      let(:package_manager) { "dummy" }
       let(:security_updates_only) { true }
       let(:dependency) do
         Dependabot::Dependency.new(
           name: "ansi-regex",
-          package_manager: "npm_and_yarn",
+          package_manager: "dummy",
           version: "6.0.0",
           requirements: [
             {
@@ -406,42 +440,6 @@ RSpec.describe Dependabot::Job do
         expect(job.commit_message_options).not_to have_key(:prefix_development)
         expect(job.commit_message_options).not_to have_key(:include_scope)
       end
-    end
-  end
-
-  describe "#clone?" do
-    subject { job.clone? }
-
-    it { is_expected.to eq(false) }
-
-    context "with vendoring configuration enabled" do
-      let(:vendor_dependencies) { true }
-
-      it { is_expected.to eq(true) }
-    end
-
-    context "for ecosystems that always clone" do
-      let(:vendor_dependencies) { false }
-      let(:dependencies) do
-        [
-          Dependabot::Dependency.new(
-            name: "github.com/pkg/errors",
-            package_manager: "go_modules",
-            version: "v1.8.0",
-            requirements: [
-              {
-                file: "go.mod",
-                requirement: "v1.8.0",
-                groups: [],
-                source: nil
-              }
-            ]
-          )
-        ]
-      end
-      let(:package_manager) { "go_modules" }
-
-      it { is_expected.to eq(true) }
     end
   end
 
