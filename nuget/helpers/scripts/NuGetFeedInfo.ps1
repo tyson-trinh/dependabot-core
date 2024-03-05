@@ -15,7 +15,7 @@ $logFile = Join-Path $logDirectory "NuGetFeedInfo.log"
 $packageNameLower = $packageName.ToLower()
 
 function TrimTrailingSlash($path) {
-    if ($path -eq $Null) {
+    if ($Null -eq $path) {
         return $path
     }
 
@@ -48,9 +48,40 @@ function GetAndLogUri($message, $uri, $responseFileName = $null) {
         }
     }
 
-    $response = Invoke-WebRequest -Uri $uri -Headers $headers -SkipHttpErrorCheck
-    Log "GET [$uri] for ($message): [$($response.StatusCode)] => [$responseFileName]"
-    if ($responseFileName -ne $null) {
+    $lastCode = -1
+    while ($True) {
+        $response = Invoke-WebRequest -Uri $uri -Headers $headers -SkipHttpErrorCheck -MaximumRedirection 0 -ErrorAction SilentlyContinue
+        Log "GET [$uri] for ($message): [$($response.StatusCode)] => [$responseFileName]"
+        if ($response.StatusCode -eq 200) {
+            break
+        }
+        elseif ($response.StatusCode -eq 400 -or $response.StatusCode -eq 401 -or $response.StatusCode -eq 403) {
+            if ($response.StatusCode -eq $lastCode) {
+                # we appear to be in a loop, just quit
+                break
+            }
+
+            # try removing the auth header
+            Write-Host "Removing authorization header and retyring"
+            $headers.Remove("Authorization")
+        }
+        elseif ($response.StatusCode -ge 300 -and $response.StatusCode -lt 400) {
+            # there seems to be cases where the location header could be a string or a string array
+            if ($response.Headers.Location.GetType().ToString() -eq "System.String[]") {
+                $uri = $response.Headers.Location[0]
+            }
+            else {
+                $uri = $response.Headers.Location
+            }
+        }
+        else {
+            break
+        }
+
+        $lastCode = $response.StatusCode
+    }
+
+    if ($null -ne $responseFileName) {
         Write-Response $response $responseFileName
     }
 
@@ -60,7 +91,7 @@ function GetAndLogUri($message, $uri, $responseFileName = $null) {
 function GetResourceByNamePreference($serviceIndex, $acceptableResourceNames) {
     foreach ($acceptableResourceName in $acceptableResourceNames) {
         $resourceElement = $serviceIndex.resources | Where-Object { $_."@type" -eq $acceptableResourceName } | Select-Object -ExpandProperty "@id" | Select-Object -First 1
-        if ($resourceElement -ne $Null) {
+        if ($Null -ne $resourceElement) {
             $result = TrimTrailingSlash $resourceElement
             Log "Returning resource URL [$result] for $acceptableResourceName"
             return $result
@@ -86,7 +117,7 @@ try {
     $searchQueryService = GetResourceByNamePreference $serviceIndex @("SearchQueryService/3.5.0", "SearchQueryService/3.0.0-rc", "SearchQueryService/3.0.0-beta", "SearchQueryService")
 
     # query for packages from PackageBaseAddress
-    if ($packageBaseAddress -eq $Null) {
+    if ($Null -eq $packageBaseAddress) {
         Log "No PackageBaseAddress found"
     }
     else {
