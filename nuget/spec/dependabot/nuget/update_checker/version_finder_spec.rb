@@ -15,7 +15,8 @@ RSpec.describe Dependabot::Nuget::UpdateChecker::VersionFinder do
       credentials: credentials,
       ignored_versions: ignored_versions,
       raise_on_ignored: raise_on_ignored,
-      security_advisories: security_advisories
+      security_advisories: security_advisories,
+      repo_contents_path: "test/repo"
     )
   end
 
@@ -57,8 +58,8 @@ RSpec.describe Dependabot::Nuget::UpdateChecker::VersionFinder do
       "microsoft.extensions.dependencymodel/index.json"
   end
   let(:nuget_search_url) do
-    "https://azuresearch-usnc.nuget.org/query" \
-      "?q=microsoft.extensions.dependencymodel&prerelease=true&semVerLevel=2.0.0"
+    "https://api.nuget.org/v3/registration5-gz-semver2/" \
+      "microsoft.extensions.dependencymodel/index.json"
   end
   let(:version_class) { Dependabot::Nuget::Version }
   let(:nuget_versions) { fixture("nuget_responses", "versions.json") }
@@ -251,13 +252,9 @@ RSpec.describe Dependabot::Nuget::UpdateChecker::VersionFinder do
       let(:custom_repo_url) do
         "https://www.myget.org/F/exceptionless/api/v3/index.json"
       end
-      let(:custom_nuget_versions_url) do
-        "https://www.myget.org/F/exceptionless/api/v3/flatcontainer/" \
-          "microsoft.extensions.dependencymodel/index.json"
-      end
       let(:custom_nuget_search_url) do
         "https://www.myget.org/F/exceptionless/api/v3/" \
-          "query?q=microsoft.extensions.dependencymodel&prerelease=true&semVerLevel=2.0.0"
+          "registration1/microsoft.extensions.dependencymodel/index.json"
       end
       before do
         stub_request(:get, nuget_versions_url).to_return(status: 404)
@@ -270,10 +267,6 @@ RSpec.describe Dependabot::Nuget::UpdateChecker::VersionFinder do
             status: 200,
             body: fixture("nuget_responses", "myget_base.json")
           )
-        stub_request(:get, custom_nuget_versions_url).to_return(status: 404)
-        stub_request(:get, custom_nuget_versions_url)
-          .with(basic_auth: %w(my passw0rd))
-          .to_return(status: 200, body: nuget_versions)
         stub_request(:get, custom_nuget_search_url).to_return(status: 404)
         stub_request(:get, custom_nuget_search_url)
           .with(basic_auth: %w(my passw0rd))
@@ -378,11 +371,7 @@ RSpec.describe Dependabot::Nuget::UpdateChecker::VersionFinder do
       end
       let(:custom_nuget_search_url) do
         "https://www.myget.org/F/exceptionless/api/v3/" \
-          "query?q=microsoft.extensions.dependencymodel&prerelease=true&semVerLevel=2.0.0"
-      end
-      let(:custom_nuget_versions_url) do
-        "https://www.myget.org/F/exceptionless/api/v3/flatcontainer/" \
-          "microsoft.extensions.dependencymodel/index.json"
+          "registration1/microsoft.extensions.dependencymodel/index.json"
       end
 
       before do
@@ -396,11 +385,6 @@ RSpec.describe Dependabot::Nuget::UpdateChecker::VersionFinder do
             status: 200,
             body: fixture("nuget_responses", "myget_base.json")
           )
-
-        stub_request(:get, custom_nuget_versions_url).to_return(status: 404)
-        stub_request(:get, custom_nuget_versions_url)
-          .with(basic_auth: %w(my passw0rd))
-          .to_return(status: 200, body: nuget_versions)
 
         stub_request(:get, custom_nuget_search_url).to_return(status: 404)
         stub_request(:get, custom_nuget_search_url)
@@ -435,6 +419,16 @@ RSpec.describe Dependabot::Nuget::UpdateChecker::VersionFinder do
       its([:version]) { is_expected.to eq(version_class.new("2.1.0")) }
     end
 
+    context "with an open upper version range specified" do
+      let(:dependency_files) { project_dependency_files("open_upper_version_range") }
+      let(:dependency_version) { "1.1.0" }
+      let(:dependency_requirements) do
+        [{ file: "my.csproj", requirement: "[1.1.0-alpha,", groups: ["dependencies"], source: nil }]
+      end
+
+      its([:version]) { is_expected.to eq(version_class.new("2.1.0")) }
+    end
+
     context "with a package that is implicitly referenced", :vcr do
       let(:dependency_files) { project_dependency_files("implicit_reference") }
       let(:dependency_requirements) do
@@ -448,6 +442,59 @@ RSpec.describe Dependabot::Nuget::UpdateChecker::VersionFinder do
       # it "returns the expected version" do
       #   expect(subject[:version]).to eq(version_class.new("6.5.0"))
       # end
+    end
+
+    context "when the package can't be meaninfully sorted by just version" do
+      before do
+        allow(finder).to receive(:str_version_compatible?).and_call_original
+        reported_versions = [
+          "2.6.1",
+          "2.7.1",
+          "3.4.0",
+          "3.14.0",
+          "4.0.1"
+        ]
+        stub_request(:get, "https://api.nuget.org/v3/registration5-gz-semver2/nunit/index.json")
+          .to_return(
+            status: 200,
+            body: {
+              items: [
+                items: reported_versions.map { |v| { catalogEntry: { listed: true, version: v } } }
+              ]
+            }.to_json
+          )
+        stub_request(:get, "https://api.nuget.org/v3-flatcontainer/nunit/3.14.0/nunit.nuspec")
+          .to_return(status: 200, body: fixture("nuspecs", "nunit.3.14.0_faked.nuspec"))
+        stub_request(:get, "https://api.nuget.org/v3-flatcontainer/nunit/4.0.1/nunit.nuspec")
+          .to_return(status: 200, body: fixture("nuspecs", "nunit.4.0.1_faked.nuspec"))
+      end
+
+      let(:csproj_body) do
+        <<~XML
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>netcoreapp3.1</TargetFramework>
+            </PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="nunit" Version="3.14.0" />
+            </ItemGroup>
+          </Project>
+        XML
+      end
+      let(:expected_version) { version_class.new("3.14.0") }
+      let(:dependency_version) { "3.14.0" }
+      let(:dependency) do
+        Dependabot::Dependency.new(
+          name: "nunit",
+          version: dependency_version,
+          requirements: [{ file: "my.csproj", requirement: "3.14.0", groups: ["dependencies"], source: nil }],
+          package_manager: "nuget"
+        )
+      end
+
+      it "returns the expected version" do
+        expect(subject[:version]).to eq(version_class.new("3.14.0"))
+      end
     end
   end
 

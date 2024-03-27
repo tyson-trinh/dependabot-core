@@ -20,6 +20,9 @@ common:
 composer:
   - *shared
   - 'composer/**'
+devcontainers:
+  - *shared
+  - 'devcontainers/**'
 docker:
   - *shared
   - 'docker/**'

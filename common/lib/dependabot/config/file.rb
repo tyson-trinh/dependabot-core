@@ -62,6 +62,7 @@ module Dependabot
         "bundler" => "bundler",
         "cargo" => "cargo",
         "composer" => "composer",
+        "devcontainer" => "devcontainers",
         "docker" => "docker",
         "elm" => "elm",
         "github-actions" => "github_actions",

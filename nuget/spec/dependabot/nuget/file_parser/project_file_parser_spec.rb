@@ -4,128 +4,9 @@
 require "spec_helper"
 require "dependabot/dependency_file"
 require "dependabot/source"
+require "dependabot/nuget/cache_manager"
 require "dependabot/nuget/file_parser/project_file_parser"
-
-module NuGetSearchStubs
-  def stub_no_search_results(name)
-    stub_request(:get, "https://azuresearch-usnc.nuget.org/query?prerelease=true&q=#{name}&semVerLevel=2.0.0")
-      .to_return(status: 200, body: fixture("nuget_responses", "search_no_data.json"))
-  end
-
-  def stub_search_results_with_versions_v3(name, versions)
-    json = search_results_with_versions_v3(name, versions)
-    stub_request(:get, "https://azuresearch-usnc.nuget.org/query?prerelease=true&q=#{name}&semVerLevel=2.0.0")
-      .to_return(status: 200, body: json)
-  end
-
-  def search_results_with_versions_v3(name, versions)
-    versions_block = versions.map do |version|
-      {
-        "version" => version,
-        "downloads" => 42,
-        "@id" => "https://api.nuget.org/v3/registration5-gz-semver2/#{name}/#{version}.json"
-      }
-    end
-    response = {
-      "@context" => {
-        "@vocab" => "http://schema.nuget.org/schema#",
-        "@base" => "https://api.nuget.org/v3/registration5-gz-semver2/"
-      },
-      "totalHits" => 1,
-      "data" => [
-        {
-          "@id" => "https://api.nuget.org/v3/registration5-gz-semver2/#{name}/index.json",
-          "@type" => "Package",
-          "registration" => "https://api.nuget.org/v3/registration5-gz-semver2/#{name}/index.json",
-          "id" => name,
-          "version" => versions.last,
-          "description" => "a description for a package that does not exist",
-          "summary" => "a summary for a package that does not exist",
-          "title" => "a title for a package that does not exist",
-          "totalDownloads" => 42,
-          "packageTypes" => [
-            {
-              "name" => "Dependency"
-            }
-          ],
-          "versions" => versions_block
-        }
-      ]
-    }
-    response.to_json
-  end
-
-  # rubocop:disable Metrics/MethodLength
-  def search_results_with_versions_v2(name, versions)
-    entries = versions.map do |version|
-      xml = <<~XML
-        <entry>
-          <id>https://www.nuget.org/api/v2/Packages(Id='#{name}',Version='#{version}')</id>
-          <category term="NuGetGallery.OData.V2FeedPackage" scheme="http://schemas.microsoft.com/ado/2007/08/dataservices/scheme" />
-          <link rel="edit" href="https://www.nuget.org/api/v2/Packages(Id='#{name}',Version='#{version}')" />
-          <link rel="self" href="https://www.nuget.org/api/v2/Packages(Id='#{name}',Version='#{version}')" />
-          <title type="text">#{name}</title>
-          <updated>2015-07-28T23:37:16Z</updated>
-          <author>
-              <name>FakeAuthor</name>
-          </author>
-          <content type="application/zip" src="https://www.nuget.org/api/v2/package/#{name}/#{version}" />
-          <m:properties>
-            <d:Id>#{name}</d:Id>
-            <d:Version>#{version}</d:Version>
-            <d:NormalizedVersion>#{version}</d:NormalizedVersion>
-            <d:Authors>FakeAuthor</d:Authors>
-            <d:Copyright>FakeCopyright</d:Copyright>
-            <d:Created m:type="Edm.DateTime">2015-07-28T23:37:16.85+00:00</d:Created>
-            <d:Dependencies></d:Dependencies>
-            <d:Description>FakeDescription</d:Description>
-            <d:DownloadCount m:type="Edm.Int64">42</d:DownloadCount>
-            <d:GalleryDetailsUrl>https://www.nuget.org/packages/#{name}/#{version}</d:GalleryDetailsUrl>
-            <d:IconUrl m:null="true" />
-            <d:IsLatestVersion m:type="Edm.Boolean">false</d:IsLatestVersion>
-            <d:IsAbsoluteLatestVersion m:type="Edm.Boolean">false</d:IsAbsoluteLatestVersion>
-            <d:IsPrerelease m:type="Edm.Boolean">false</d:IsPrerelease>
-            <d:Language m:null="true" />
-            <d:LastUpdated m:type="Edm.DateTime">2015-07-28T23:37:16.85+00:00</d:LastUpdated>
-            <d:Published m:type="Edm.DateTime">2015-07-28T23:37:16.85+00:00</d:Published>
-            <d:PackageHash>FakeHash</d:PackageHash>
-            <d:PackageHashAlgorithm>SHA512</d:PackageHashAlgorithm>
-            <d:PackageSize m:type="Edm.Int64">42</d:PackageSize>
-            <d:ProjectUrl>https://example.com/#{name}</d:ProjectUrl>
-            <d:ReportAbuseUrl>https://example.com/#{name}</d:ReportAbuseUrl>
-            <d:ReleaseNotes m:null="true" />
-            <d:RequireLicenseAcceptance m:type="Edm.Boolean">false</d:RequireLicenseAcceptance>
-            <d:Summary></d:Summary>
-            <d:Tags></d:Tags>
-            <d:Title>#{name}</d:Title>
-            <d:VersionDownloadCount m:type="Edm.Int64">42</d:VersionDownloadCount>
-            <d:MinClientVersion m:null="true" />
-            <d:LastEdited m:type="Edm.DateTime">2018-12-08T05:53:10.917+00:00</d:LastEdited>
-            <d:LicenseUrl>http://www.apache.org/licenses/LICENSE-2.0</d:LicenseUrl>
-            <d:LicenseNames m:null="true" />
-            <d:LicenseReportUrl m:null="true" />
-          </m:properties>
-        </entry>
-      XML
-      xml = xml.split("\n").map { |line| "  #{line}" }.join("\n")
-      xml
-    end.join("\n")
-    xml = <<~XML
-      <?xml version="1.0" encoding="utf-8"?>
-      <feed xml:base="https://www.nuget.org/api/v2" xmlns="http://www.w3.org/2005/Atom" xmlns:d="http://schemas.microsoft.com/ado/2007/08/dataservices"
-        xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata" xmlns:georss="http://www.georss.org/georss" xmlns:gml="http://www.opengis.net/gml">
-        <m:count>#{versions.length}</m:count>
-        <id>http://schemas.datacontract.org/2004/07/</id>
-        <title />
-        <updated>2023-12-05T23:35:30Z</updated>
-        <link rel="self" href="https://www.nuget.org/api/v2/Packages" />
-        #{entries}
-      </feed>
-    XML
-    xml
-  end
-  # rubocop:enable Metrics/MethodLength
-end
+require_relative "../nuget_search_stubs"
 
 RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
   RSpec.configure do |config|
@@ -136,7 +17,9 @@ RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
     Dependabot::DependencyFile.new(name: "my.csproj", content: file_body)
   end
   let(:file_body) { fixture("csproj", "basic.csproj") }
-  let(:parser) { described_class.new(dependency_files: [file], credentials: credentials) }
+  let(:parser) do
+    described_class.new(dependency_files: [file], credentials: credentials, repo_contents_path: "/test/repo")
+  end
   let(:credentials) do
     [{
       "type" => "git_source",
@@ -164,6 +47,30 @@ RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
     stub_search_results_with_versions_v3("system.collections.specialized", versions)
   end
 
+  describe "#downstream_file_references" do
+    subject(:downstream_file_references) { parser.downstream_file_references(project_file: file) }
+
+    context "when there is no `Include` or `Update` attribute on the `<PackageReference>`" do
+      let(:file_body) do
+        <<~XML
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net8.0</TargetFramework>
+            </PropertyGroup>
+            <ItemGroup>
+              <ProjectReference Exclude="Not.Used.Here.csproj" />
+              <ProjectReference Include="Some.Other.Project.csproj" />
+            </ItemGroup>
+          </Project>
+        XML
+      end
+
+      it "does not report that dependency" do
+        expect(downstream_file_references).to eq(Set["Some.Other.Project.csproj"])
+      end
+    end
+  end
+
   describe "dependency_set" do
     subject(:dependency_set) { parser.dependency_set(project_file: file) }
 
@@ -187,7 +94,9 @@ RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
           )
         ]
       end
-      let(:parser) { described_class.new(dependency_files: files, credentials: credentials) }
+      let(:parser) do
+        described_class.new(dependency_files: files, credentials: credentials, repo_contents_path: "/test/repo")
+      end
       let(:dependencies) { dependency_set.dependencies }
       subject(:transitive_dependencies) { dependencies.reject(&:top_level?) }
 
@@ -247,6 +156,70 @@ RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
           expect(dependency.version).to eq("1.0.1")
           expect(dependency.requirements).to eq([])
         end
+      end
+    end
+
+    describe "dependencies from Directory.Packages.props" do
+      let(:parser) do
+        described_class.new(dependency_files: dependency_files, credentials: credentials,
+                            repo_contents_path: "/test/repo")
+      end
+      let(:project_file) do
+        Dependabot::DependencyFile.new(
+          name: "project.csproj",
+          content:
+            <<~XML
+              <Project Sdk="Microsoft.NET.Sdk">
+                <PropertyGroup>
+                  <TargetFramework>net8.0</TargetFramework>
+                </PropertyGroup>
+                <ItemGroup>
+                  <PackageReference Include="Some.Package" />
+                  <PackageReference Include="Some.Other.Package" />
+                </ItemGroup>
+              </Project>
+            XML
+        )
+      end
+      let(:dependency_set) { parser.dependency_set(project_file: project_file) }
+      let(:dependency_files) do
+        [
+          project_file,
+          Dependabot::DependencyFile.new(
+            name: "Directory.Packages.props",
+            content:
+              <<~XML
+                <Project>
+                  <PropertyGroup>
+                    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+                  </PropertyGroup>
+                  <ItemGroup>
+                    <PackageVersion Include="Some.Package" Version="$(SomePropertyThatIsNotResolvable)" />
+                    <PackageVersion Include="Some.Other.Package" Version="4.5.6" />
+                  </ItemGroup>
+                </Project>
+              XML
+          )
+        ]
+      end
+
+      subject(:dependencies) { dependency_set.dependencies }
+
+      before do
+        stub_search_results_with_versions_v3("some.package", ["1.2.3"])
+        stub_search_results_with_versions_v3("some.other.package", ["4.5.6"])
+      end
+
+      it "returns the correct information" do
+        expect(dependencies.length).to eq(2)
+
+        expect(dependencies[0]).to be_a(Dependabot::Dependency)
+        expect(dependencies[0].name).to eq("Some.Package")
+        expect(dependencies[0].version).to eq("$SomePropertyThatIsNotResolvable")
+
+        expect(dependencies[1]).to be_a(Dependabot::Dependency)
+        expect(dependencies[1].name).to eq("Some.Other.Package")
+        expect(dependencies[1].version).to eq("4.5.6")
       end
     end
 
@@ -493,7 +466,10 @@ RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
             ]
           end
 
-          let(:parser) { described_class.new(dependency_files: files, credentials: credentials) }
+          let(:parser) do
+            described_class.new(dependency_files: files, credentials: credentials,
+                                repo_contents_path: "/test/repo")
+          end
 
           subject(:dependency) do
             top_level_dependencies.find { |d| d.name == "Newtonsoft.Json" }
@@ -546,7 +522,10 @@ RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
             ]
           end
 
-          let(:parser) { described_class.new(dependency_files: files, credentials: credentials) }
+          let(:parser) do
+            described_class.new(dependency_files: files, credentials: credentials,
+                                repo_contents_path: "/test/repo")
+          end
 
           subject(:dependency) do
             top_level_dependencies.find { |d| d.name == "Newtonsoft.Json" }
@@ -607,7 +586,10 @@ RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
             ]
           end
 
-          let(:parser) { described_class.new(dependency_files: files, credentials: credentials) }
+          let(:parser) do
+            described_class.new(dependency_files: files, credentials: credentials,
+                                repo_contents_path: "/test/repo")
+          end
 
           subject(:dependency) do
             top_level_dependencies.find { |d| d.name == "Newtonsoft.Json" }
@@ -687,14 +669,19 @@ RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
             end
           end
 
+          # This is a bit of a noop now that we're moved off the query Nuget API,
+          # But we're keeping the test for completeness.
           describe "the dependency name is a partial, but not perfect match" do
             let(:file_body) do
               fixture("csproj", "dependency_with_name_that_does_not_exist.csproj")
             end
 
             before do
-              stub_request(:get, "https://azuresearch-usnc.nuget.org/query?prerelease=true&q=this.dependency.does.not.exist&semVerLevel=2.0.0")
-                .to_return(status: 200, body: search_results_with_versions_v3(
+              stub_request(:get, "https://api.nuget.org/v3/registration5-gz-semver2/this.dependency.does.not.exist/index.json")
+                .to_return(status: 404, body: "")
+
+              stub_request(:get, "https://api.nuget.org/v3/registration5-gz-semver2/this.dependency.does.not.exist_but.this.one.does")
+                .to_return(status: 200, body: registration_results(
                   "this.dependency.does.not.exist_but.this.one.does", ["1.0.0"]
                 ))
             end
@@ -737,26 +724,32 @@ RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
             let(:nuget_config_file) do
               Dependabot::DependencyFile.new(name: "NuGet.config", content: nuget_config_body)
             end
-            let(:parser) { described_class.new(dependency_files: [file, nuget_config_file], credentials: credentials) }
+            let(:parser) do
+              described_class.new(dependency_files: [file, nuget_config_file], credentials: credentials,
+                                  repo_contents_path: "/test/repo")
+            end
 
             before do
               # no results
               stub_request(:get, "https://no-results.api.example.com/v3/index.json")
                 .to_return(status: 200, body: fixture("nuget_responses", "index.json",
                                                       "no-results.api.example.com.index.json"))
-              stub_request(:get, "https://no-results.api.example.com/query?prerelease=true&q=microsoft.extensions.dependencymodel&semVerLevel=2.0.0")
-                .to_return(status: 200, body: fixture("nuget_responses", "search_no_data.json"))
-              stub_request(:get, "https://no-results.api.example.com/query?prerelease=true&q=this.dependency.does.not.exist&semVerLevel=2.0.0")
-                .to_return(status: 200, body: fixture("nuget_responses", "search_no_data.json"))
+              stub_request(:get, "https://no-results.api.example.com/v3/registration5-gz-semver2/this.dependency.does.not.exist/index.json")
+                .to_return(status: 404, body: "")
+              stub_request(:get, "https://no-results.api.example.com/v3/registration5-gz-semver2/microsoft.extensions.dependencymodel/index.json")
+                .to_return(status: 404, body: "")
+
               # with results
               stub_request(:get, "https://with-results.api.example.com/v3/index.json")
                 .to_return(status: 200, body: fixture("nuget_responses", "index.json",
                                                       "with-results.api.example.com.index.json"))
-              stub_request(:get, "https://with-results.api.example.com/query?prerelease=true&q=microsoft.extensions.dependencymodel&semVerLevel=2.0.0")
-                .to_return(status: 200, body: search_results_with_versions_v3("microsoft.extensions.dependencymodel",
-                                                                              ["1.1.1", "1.1.0"]))
-              stub_request(:get, "https://with-results.api.example.com/query?prerelease=true&q=this.dependency.does.not.exist&semVerLevel=2.0.0")
-                .to_return(status: 200, body: fixture("nuget_responses", "search_no_data.json"))
+              stub_request(:get, "https://with-results.api.example.com/v3/registration5-gz-semver2/" \
+                                 "microsoft.extensions.dependencymodel/index.json")
+                .to_return(status: 200, body: registration_results("microsoft.extensions.dependencymodel",
+                                                                   ["1.1.1", "1.1.0"]))
+              stub_request(:get, "https://with-results.api.example.com/v3/registration5-gz-semver2/" \
+                                 "this.dependency.does.not.exist/index.json")
+                .to_return(status: 404, body: "")
             end
 
             it "has the right details" do
@@ -805,7 +798,10 @@ RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
             let(:nuget_config_file) do
               Dependabot::DependencyFile.new(name: "NuGet.config", content: nuget_config_body)
             end
-            let(:parser) { described_class.new(dependency_files: [file, nuget_config_file], credentials: credentials) }
+            let(:parser) do
+              described_class.new(dependency_files: [file, nuget_config_file], credentials: credentials,
+                                  repo_contents_path: "/test/repo")
+            end
 
             before do
               stub_request(:get, "https://www.nuget.org/api/v2/")
@@ -828,6 +824,48 @@ RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
                   source: nil
                 }]
               )
+            end
+          end
+
+          describe "nuget.config files further up the tree are considered" do
+            let(:file_body) { "not relevant" }
+            let(:file) do
+              Dependabot::DependencyFile.new(directory: "src/project", name: "my.csproj", content: file_body)
+            end
+            let(:nuget_config_body) { "not relevant" }
+            let(:nuget_config_file) do
+              Dependabot::DependencyFile.new(name: "../../NuGet.Config", content: nuget_config_body)
+            end
+            let(:parser) do
+              described_class.new(dependency_files: [file, nuget_config_file], credentials: credentials,
+                                  repo_contents_path: "/test/repo")
+            end
+
+            it "finds the config file up several directories" do
+              nuget_configs = parser.nuget_configs
+              expect(nuget_configs.count).to eq(1)
+              expect(nuget_configs.first).to be_a(Dependabot::DependencyFile)
+              expect(nuget_configs.first.name).to eq("../../NuGet.Config")
+            end
+          end
+
+          describe "files with a `nuget.config` suffix are not considered" do
+            let(:file_body) { "not relevant" }
+            let(:file) do
+              Dependabot::DependencyFile.new(directory: "src/project", name: "my.csproj", content: file_body)
+            end
+            let(:nuget_config_body) { "not relevant" }
+            let(:nuget_config_file) do
+              Dependabot::DependencyFile.new(name: "../../not-NuGet.Config", content: nuget_config_body)
+            end
+            let(:parser) do
+              described_class.new(dependency_files: [file, nuget_config_file], credentials: credentials,
+                                  repo_contents_path: "/test/repo")
+            end
+
+            it "does not return a name with a partial match" do
+              nuget_configs = parser.nuget_configs
+              expect(nuget_configs.count).to eq(0)
             end
           end
 
@@ -863,15 +901,21 @@ RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
             let(:file2) do
               Dependabot::DependencyFile.new(name: "my2.csproj", content: file_2_body)
             end
-            let(:parser) { described_class.new(dependency_files: [file, file2], credentials: credentials) }
+            let(:parser) do
+              described_class.new(dependency_files: [file, file2], credentials: credentials,
+                                  repo_contents_path: "/test/repo")
+            end
 
             before do
               stub_no_search_results("this.dependency.does.not.exist")
+              ENV["DEPENDABOT_NUGET_CACHE_DISABLED"] = "false"
             end
 
             it "has the right details" do
-              query_stub = stub_search_results_with_versions_v3("microsoft.extensions.dependencymodel_cached",
-                                                                ["1.1.1", "1.1.0"])
+              ENV["DEPENDABOT_NUGET_CACHE_DISABLED"] = "false"
+
+              registry_stub = stub_registry_v3("microsoft.extensions.dependencymodel_cached", ["1.1.1", "1.1.0"])
+
               expect(top_level_dependencies.count).to eq(1)
               expect(top_level_dependencies.first).to be_a(Dependabot::Dependency)
               expect(top_level_dependencies.first.name).to eq("Microsoft.Extensions.DependencyModel_cached")
@@ -884,7 +928,14 @@ RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
                   source: nil
                 }]
               )
-              expect(WebMock::RequestRegistry.instance.times_executed(query_stub.request_pattern)).to eq(1)
+              expect(WebMock::RequestRegistry.instance.times_executed(registry_stub.request_pattern)).to eq(1)
+            ensure
+              ENV["DEPENDABOT_NUGET_CACHE_DISABLED"] = "true"
+              Dependabot::Nuget::CacheManager.instance_variable_set(:@cache, nil)
+            end
+
+            after do
+              ENV["DEPENDABOT_NUGET_CACHE_DISABLED"] = "true"
             end
           end
         end
@@ -894,7 +945,7 @@ RSpec.describe Dependabot::Nuget::FileParser::ProjectFileParser do
         let(:file_body) { fixture("csproj", "basic.nuproj") }
 
         before do
-          stub_search_results_with_versions_v3("nanoframework.coreextra", [])
+          stub_search_results_with_versions_v3("nanoframework.coreextra", ["1.0.0"])
         end
 
         it "gets the right number of dependencies" do
