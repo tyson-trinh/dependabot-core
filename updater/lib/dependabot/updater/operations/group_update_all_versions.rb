@@ -97,11 +97,11 @@ module Dependabot
               # Therefore, we can skip a grouped dependency if it's been updated in *any* directory
               # add the dependencies in the group so individual updates don't try to update them
               dependency_snapshot.add_handled_group_dependencies(
-                dependencies_in_existing_pr_for_group(group).map { |d| d["dependency-name"] }
+                dependencies_in_existing_pr_for_group(group).group_by { |d| d["directory"] }
               )
               # also add dependencies that might be in the group, as a rebase would add them;
               # this avoids individual PR creation that immediately is superseded by a group PR supersede
-              dependency_snapshot.add_handled_group_dependencies(group.dependencies.map(&:name))
+              dependency_snapshot.add_handled_group_dependencies(group.dependencies.group_by(&:directory))
               next
             end
 
