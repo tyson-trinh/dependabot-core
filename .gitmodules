@@ -2,3 +2,6 @@
 	path = nuget/helpers/lib/NuGet.Client
 	url = https://github.com/NuGet/NuGet.Client
 	branch = release-6.10.x
+[submodule "example-java-backend"]
+	path = example-java-backend
+	url = git@github.com:tyson-trinh/example-java-backend.git

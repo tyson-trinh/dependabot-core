@@ -83,6 +83,8 @@ require "debug"
 require "logger"
 require "dependabot/logger"
 require "stackprof"
+require 'nokogiri'
+require 'diffy'
 
 Dependabot.logger = Logger.new($stdout)
 
@@ -531,10 +533,16 @@ else
   end
 end
 
+name = "Version-Update-Only"
+rules = {"patterns" => ["*"]}
+applies_to = "version-updates"
+$group = Dependabot::DependencyGroup.new(name: name, rules: rules, applies_to: applies_to)
+
 def update_checker_for(dependency)
   Dependabot::UpdateCheckers.for_package_manager($package_manager).new(
     dependency: dependency,
     dependency_files: $files,
+    dependency_group: $group,
     credentials: $options[:credentials],
     repo_contents_path: $repo_contents_path,
     requirements_update_strategy: $options[:requirements_update_strategy],
@@ -755,7 +763,17 @@ dependencies.each do |dep|
       if updated_file.operation == Dependabot::DependencyFile::Operation::DELETE
         FileUtils.rm_f(path)
       else
-        File.write(path, updated_file.decoded_content)
+        old_file_content = File.read(path)
+        new_content = updated_file.decoded_content
+        old_doc = Nokogiri::XML(old_file_content) {|config| config.default_xml.noblanks}
+        new_doc = Nokogiri::XML(new_content) {|config| config.default_xml.noblanks}
+        old_doc_str = old_doc.to_xml(indent:2)
+        new_doc_str = new_doc.to_xml(indent:2)
+        diff_str = Diffy::Diff.new(old_doc_str, new_doc_str, :include_diff_info => true).to_s(:text)
+        File.open(diff_file_path, "w") do |f|
+          f.puts diff_str
+        end
+        # File.write(path, updated_file.decoded_content)
       end
     end
   end

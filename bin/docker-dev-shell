@@ -39,7 +39,7 @@ while true; do
   esac
 done
 
-IMAGE_NAME="dependabot/dependabot-core-development-$ECOSYSTEM"
+IMAGE_NAME="anhtung19x9/dependabot-core-development-$ECOSYSTEM"
 CONTAINER_NAME="dependabot-core-development-$ECOSYSTEM"
 DOCKERFILE="Dockerfile.development"
 
@@ -234,6 +234,7 @@ docker run --rm -ti \
   -v "$(pwd)/updater/Gemfile:$CODE_DIR/dependabot-updater/Gemfile" \
   -v "$(pwd)/updater/lib:$CODE_DIR/dependabot-updater/lib" \
   -v "$(pwd)/updater/spec:$CODE_DIR/dependabot-updater/spec" \
+  -v "$(pwd)/example-java-backend:$CODE_DIR/example-java-backend" \
   --name "$CONTAINER_NAME" \
   --env "LOCAL_GITHUB_ACCESS_TOKEN=$LOCAL_GITHUB_ACCESS_TOKEN" \
   --env "DEPENDABOT_TEST_ACCESS_TOKEN" \
