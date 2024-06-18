@@ -1,4 +1,4 @@
-FROM ghcr.io/dependabot/dependabot-updater-core
+FROM anhtung19x9/dependabot-updater-core
 
 USER dependabot
 COPY --chown=dependabot:dependabot maven $DEPENDABOT_HOME/maven
