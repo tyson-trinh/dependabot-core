@@ -83,8 +83,6 @@ require "debug"
 require "logger"
 require "dependabot/logger"
 require "stackprof"
-require 'nokogiri'
-require 'diffy'
 
 Dependabot.logger = Logger.new($stdout)
 
@@ -533,10 +531,16 @@ else
   end
 end
 
-name = "Version-Update-Only"
-rules = {"patterns" => ["*"]}
-applies_to = "version-updates"
-$group = Dependabot::DependencyGroup.new(name: name, rules: rules, applies_to: applies_to)
+hash = {
+  "name" => "version-updates",
+  "rules" => {
+    "patterns" => ["*"],
+    "update-types" => ["patch"]
+  },
+  "applies-to" => "version-updates"
+}
+
+$group = Dependabot::DependencyGroup.new(name: hash["name"], rules: hash["rules"], applies_to: hash["applies-to"])
 
 def update_checker_for(dependency)
   Dependabot::UpdateCheckers.for_package_manager($package_manager).new(
@@ -625,6 +629,7 @@ end
 puts "=> updating #{dependencies.count} dependencies: #{dependencies.map(&:name).join(', ')}"
 
 # rubocop:disable Metrics/BlockLength
+my_array_deps = []
 checker_count = 0
 dependencies.each do |dep|
   checker_count += 1
@@ -717,7 +722,9 @@ dependencies.each do |dep|
   # Removal is only supported for transitive dependencies which are removed as a
   # side effect of the parent update
   deps_to_update = updated_deps.reject(&:removed?)
-  updater = file_updater_for(deps_to_update)
+  my_array_deps.push(updated_deps[0])
+
+  updater = file_updater_for(my_array_deps)
   updated_files = updater.updated_dependency_files
 
   updated_deps = updated_deps.reject do |d|
@@ -738,22 +745,6 @@ dependencies.each do |dep|
 
   puts " => #{msg.pr_name.downcase}"
 
-  assignee = (ENV["PULL_REQUESTS_ASSIGNEE"] || ENV["GITLAB_ASSIGNEE_ID"])&.to_i
-  assignees = assignee ? [assignee] : assignee
-  pr_creator = Dependabot::PullRequestCreator.new(
-    source: $source,
-    base_commit: $commit,
-    dependencies: updated_deps,
-    files: updated_files,
-    credentials:  $options[:credentials],
-    assignees: assignees,
-    author_details: { name: "Dependabot", email: "no-reply@github.com" },
-    label_language: true,
-  )
-  pull_request = pr_creator.create
-
-  puts "submitted"
-
   if $options[:write]
     updated_files.each do |updated_file|
       path = File.join(dependency_files_cache_dir, updated_file.name)
@@ -763,17 +754,7 @@ dependencies.each do |dep|
       if updated_file.operation == Dependabot::DependencyFile::Operation::DELETE
         FileUtils.rm_f(path)
       else
-        old_file_content = File.read(path)
-        new_content = updated_file.decoded_content
-        old_doc = Nokogiri::XML(old_file_content) {|config| config.default_xml.noblanks}
-        new_doc = Nokogiri::XML(new_content) {|config| config.default_xml.noblanks}
-        old_doc_str = old_doc.to_xml(indent:2)
-        new_doc_str = new_doc.to_xml(indent:2)
-        diff_str = Diffy::Diff.new(old_doc_str, new_doc_str, :include_diff_info => true).to_s(:text)
-        File.open(diff_file_path, "w") do |f|
-          f.puts diff_str
-        end
-        # File.write(path, updated_file.decoded_content)
+        File.write(path, updated_file.decoded_content)
       end
     end
   end
@@ -803,6 +784,28 @@ rescue StandardError => e
   puts " => handled error whilst updating #{dep.name}: #{error_details.fetch(:"error-type")} " \
        "#{error_details.fetch(:"error-detail")}"
 end
+assignee = (ENV["PULL_REQUESTS_ASSIGNEE"] || ENV["GITLAB_ASSIGNEE_ID"])&.to_i
+assignees = assignee ? [assignee] : assignee
+pr_creator = Dependabot::PullRequestCreator.new(
+  source: $source,
+  base_commit: $commit,
+  dependencies: my_array_deps,
+  files: $files,
+  credentials:  $options[:credentials],
+  assignees: assignees,
+  author_details: { name: "Dependabot", email: "no-reply@github.com" },
+  label_language: true,
+)
+
+if my_array_deps.length > 0
+  pull_request = pr_creator.create
+else
+  puts "Nothing need to update."
+end
+
+
+
+puts "submitted"
 
 StackProf.stop if $options[:profile]
 StackProf.results("tmp/stackprof-#{Time.now.strftime('%Y-%m-%d-%H:%M')}.dump") if $options[:profile]
