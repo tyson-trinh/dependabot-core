@@ -813,7 +813,7 @@ if my_array_deps.length > 0
   custom_message = Dependabot::PullRequestCreator::Message.new(
     pr_name: "#{pr_name} - #{current_time.strftime('%Y-%m-%d')}",
     pr_message: msg.pr_message,
-    commit_message: msg.commit_message
+    commit_message: "#{pr_name} - #{current_time.strftime('%Y-%m-%d')}"
   )
 
   assignee = (ENV["PULL_REQUESTS_ASSIGNEE"] || ENV["GITLAB_ASSIGNEE_ID"])&.to_i
