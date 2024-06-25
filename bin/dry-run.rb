@@ -791,6 +791,17 @@ rescue StandardError => e
        "#{error_details.fetch(:"error-detail")}"
 end
 
+def truncate_string(input_string)
+  max_length = 65500
+  if input_string.length > max_length
+    truncated_string = input_string[0, max_length]
+    puts "String was too long and has been truncated."
+    truncated_string
+  else
+    input_string
+  end
+end
+
 if my_array_deps.length > 0
   msg = Dependabot::PullRequestCreator::MessageBuilder.new(
     dependencies: my_array_deps,
@@ -812,7 +823,7 @@ if my_array_deps.length > 0
 
   custom_message = Dependabot::PullRequestCreator::Message.new(
     pr_name: "#{pr_name} - #{current_time.strftime('%Y-%m-%d')}",
-    pr_message: msg.pr_message,
+    pr_message: truncate_string(msg.pr_message),
     commit_message: "#{pr_name} - #{current_time.strftime('%Y-%m-%d')}"
   )
 
