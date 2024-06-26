@@ -794,7 +794,7 @@ rescue StandardError => e
 end
 
 def truncate_string(input_string)
-  max_length = 65536
+  max_length = 65500
   if input_string.length > max_length
     truncated_string = input_string[0, max_length]
     puts "String was too long and has been truncated."
@@ -817,14 +817,13 @@ if my_array_deps.length > 0
   puts " => #{msg}"
 
   pr_name = "Dependencies - Version Update"
-  current_time = Time.now
 
   if $options[:security_updates_only] == true
     pr_name = "Dependencies - Security Update"
   end
 
   custom_message = Dependabot::PullRequestCreator::Message.new(
-    pr_name: "#{pr_name} - #{current_time.strftime('%Y-%m-%d')}",
+    pr_name: pr_name,
     pr_message: msg.pr_message,
     commit_message: msg.commit_message
   )
@@ -849,7 +848,7 @@ if my_array_deps.length > 0
     puts "branch PR #{branch}"
     head_commit_sha = branch.commit.sha
     puts "head_commit_sha PR #{head_commit_sha}"
-    puts "commit PR #{$commit}"
+    puts "base commit PR #{$commit}"
     puts "The head branch of the pull request with the message '#{pr_name}' is: #{branch_name}"
     pr_updater = Dependabot::PullRequestUpdater.new(
       source: $source,
