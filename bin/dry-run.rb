@@ -83,6 +83,7 @@ require "debug"
 require "logger"
 require "dependabot/logger"
 require "stackprof"
+require 'octokit'
 
 Dependabot.logger = Logger.new($stdout)
 
@@ -94,6 +95,7 @@ require "dependabot/file_updaters"
 require "dependabot/pull_request_creator"
 require "dependabot/config/file_fetcher"
 require "dependabot/simple_instrumentor"
+require "dependabot/pull_request_updater"
 
 require "dependabot/bundler"
 require "dependabot/cargo"
@@ -792,7 +794,7 @@ rescue StandardError => e
 end
 
 def truncate_string(input_string)
-  max_length = 65500
+  max_length = 65536
   if input_string.length > max_length
     truncated_string = input_string[0, max_length]
     puts "String was too long and has been truncated."
@@ -823,29 +825,66 @@ if my_array_deps.length > 0
 
   custom_message = Dependabot::PullRequestCreator::Message.new(
     pr_name: "#{pr_name} - #{current_time.strftime('%Y-%m-%d')}",
-    pr_message: truncate_string(msg.pr_message),
-    commit_message: "#{pr_name} - #{current_time.strftime('%Y-%m-%d')}"
+    pr_message: msg.pr_message,
+    commit_message: msg.commit_message
   )
 
-  assignee = (ENV["PULL_REQUESTS_ASSIGNEE"] || ENV["GITLAB_ASSIGNEE_ID"])&.to_i
-  assignees = assignee ? [assignee] : assignee
-  pr_creator = Dependabot::PullRequestCreator.new(
-    source: $source,
-    base_commit: $commit,
-    dependencies: my_array_deps,
-    files: my_updated_files,
-    message: custom_message,
-    credentials:  $options[:credentials],
-    assignees: assignees,
-    author_details: { name: "Dependabot", email: "no-reply@github.com" },
-    label_language: true,
-  )
-  pull_request = pr_creator.create
+  client = Octokit::Client.new(:access_token => ENV.fetch("LOCAL_GITHUB_ACCESS_TOKEN", nil))
+
+  pull_requests = client.pull_requests($repo_name, :state => 'open')
+
+  matching_pr = pull_requests.find do |pr|
+    pr.title.include?(pr_name) || pr.body.include?(pr_name)
+  end
+
+
+  if matching_pr
+    # Get the head branch of the matching pull request
+    puts "Matching PR #{matching_pr}"
+    branch_name = matching_pr.head.ref
+    puts "branch_name PR #{branch_name}"
+    pr_number = matching_pr.number
+    puts "pr_number PR #{pr_number}"
+    branch = client.branch($repo_name, branch_name)
+    puts "branch PR #{branch}"
+    head_commit_sha = branch.commit.sha
+    puts "head_commit_sha PR #{head_commit_sha}"
+    puts "commit PR #{$commit}"
+    puts "The head branch of the pull request with the message '#{pr_name}' is: #{branch_name}"
+    pr_updater = Dependabot::PullRequestUpdater.new(
+      source: $source,
+      base_commit: $commit,
+      old_commit: head_commit_sha,
+      files: my_updated_files,
+      credentials: $options[:credentials],
+      pull_request_number: pr_number,
+      author_details: {
+        email: "support@dependabot.com",
+        name: "dependabot"
+      }
+    )
+    pr_updater.update
+  else
+    puts "No open pull request found with the message '#{pr_name}'"
+    assignee = (ENV["PULL_REQUESTS_ASSIGNEE"] || ENV["GITLAB_ASSIGNEE_ID"])&.to_i
+    assignees = assignee ? [assignee] : assignee
+    pr_creator = Dependabot::PullRequestCreator.new(
+      source: $source,
+      base_commit: $commit,
+      dependencies: my_array_deps,
+      files: my_updated_files,
+      message: custom_message,
+      credentials:  $options[:credentials],
+      assignees: assignees,
+      author_details: { name: "Dependabot", email: "no-reply@github.com" },
+      label_language: true,
+    )
+    pull_request = pr_creator.create
+  end
+  puts "submitted"
 else
   puts "Nothing need to update."
 end
-
-puts "submitted"
 
 StackProf.stop if $options[:profile]
 StackProf.results("tmp/stackprof-#{Time.now.strftime('%Y-%m-%d-%H:%M')}.dump") if $options[:profile]
