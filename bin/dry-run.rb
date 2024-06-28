@@ -794,7 +794,7 @@ rescue StandardError => e
 end
 
 def truncate_string(input_string)
-  max_length = 65500
+  max_length = 65536
   if input_string.length > max_length
     truncated_string = input_string[0, max_length]
     puts "String was too long and has been truncated."
@@ -802,6 +802,69 @@ def truncate_string(input_string)
   else
     input_string
   end
+end
+
+def add_comments_pr(dependencies, my_updated_files, pr_number, client)
+  dependencies.each do |dep|
+    msg = Dependabot::PullRequestCreator::MessageBuilder.new(
+      dependencies: [dep],
+      files: my_updated_files,
+      credentials: $options[:credentials],
+      source: $source,
+      commit_message_options: $update_config.commit_message_options.to_h,
+      github_redirection_service: Dependabot::PullRequestCreator::DEFAULT_GITHUB_REDIRECTION_SERVICE
+    ).message
+
+    puts " => #{msg}"
+
+    client.add_comment($repo_name, pr_number, msg.pr_message)
+  end
+end
+
+def get_all_comments(client, repo, pr_number)
+  comments = client.issue_comments(repo, pr_number)
+  comments
+end
+
+def delete_comments_starting_with_bumps(client, repo, pr_number)
+  comments = get_all_comments(client, repo, pr_number)
+  comments.each do |comment|
+    if comment.body.start_with?('Bumps')
+      client.delete_comment(repo, comment.id)
+      puts "Deleted comment: #{comment.id}"
+    end
+  end
+end
+
+def update_commit_message(client, repo, branch, commit_sha, new_message)
+  puts "new msg - #{new_message}"
+  # Get the commit object
+  commit = client.commit(repo, commit_sha)
+
+  # Get the tree SHA and parent SHAs from the original commit
+  tree_sha = commit.commit.tree.sha
+  parent_shas = commit.parents.map(&:sha)
+
+  # Create a new commit with the same tree and parents but with the updated message
+  new_commit = client.create_commit(repo, new_message, tree_sha, parent_shas)
+
+  # Update the branch to point to the new commit
+  client.update_ref(repo, "heads/#{branch}", new_commit.sha, true)
+
+  puts "Updated commit message: #{new_commit.sha}"
+end
+
+def close_pull_request(client, repo, pull_request_number)
+  client.update_pull_request(repo, pull_request_number, state: 'closed')
+  puts "Closed pull request ##{pull_request_number}"
+end
+
+client = Octokit::Client.new(:access_token => ENV.fetch("LOCAL_GITHUB_ACCESS_TOKEN", nil))
+
+pr_name = "Dependencies - Version Update"
+
+if $options[:security_updates_only] == true
+  pr_name = "Dependencies - Security Update"
 end
 
 if my_array_deps.length > 0
@@ -814,28 +877,17 @@ if my_array_deps.length > 0
     github_redirection_service: Dependabot::PullRequestCreator::DEFAULT_GITHUB_REDIRECTION_SERVICE
   ).message
 
-  puts " => #{msg}"
-
-  pr_name = "Dependencies - Version Update"
-
-  if $options[:security_updates_only] == true
-    pr_name = "Dependencies - Security Update"
-  end
-
   custom_message = Dependabot::PullRequestCreator::Message.new(
     pr_name: pr_name,
-    pr_message: msg.pr_message,
+    pr_message: "",
     commit_message: msg.commit_message
   )
-
-  client = Octokit::Client.new(:access_token => ENV.fetch("LOCAL_GITHUB_ACCESS_TOKEN", nil))
 
   pull_requests = client.pull_requests($repo_name, :state => 'open')
 
   matching_pr = pull_requests.find do |pr|
     pr.title.include?(pr_name) || pr.body.include?(pr_name)
   end
-
 
   if matching_pr
     # Get the head branch of the matching pull request
@@ -848,7 +900,10 @@ if my_array_deps.length > 0
     puts "branch PR #{branch}"
     head_commit_sha = branch.commit.sha
     puts "head_commit_sha PR #{head_commit_sha}"
-    puts "base commit PR #{$commit}"
+    base_branch = $options[:branch] || "main"
+    puts "base branch PR #{base_branch}"
+    base_ = $options[:branch] || "main"
+    puts "commit PR #{$commit}"
     puts "The head branch of the pull request with the message '#{pr_name}' is: #{branch_name}"
     pr_updater = Dependabot::PullRequestUpdater.new(
       source: $source,
@@ -862,7 +917,16 @@ if my_array_deps.length > 0
         name: "dependabot"
       }
     )
+
     pr_updater.update
+    delete_comments_starting_with_bumps(client, $repo_name, pr_number)
+    add_comments_pr(my_array_deps, my_updated_files, pr_number, client)
+
+    branch = client.branch($repo_name, branch_name)
+    puts "branch PR #{branch}"
+    head_commit_sha = branch.commit.sha
+    puts "head_commit_sha PR #{head_commit_sha}"
+    update_commit_message(client,  $repo_name, branch_name, head_commit_sha, msg.commit_message)
   else
     puts "No open pull request found with the message '#{pr_name}'"
     assignee = (ENV["PULL_REQUESTS_ASSIGNEE"] || ENV["GITLAB_ASSIGNEE_ID"])&.to_i
@@ -879,10 +943,30 @@ if my_array_deps.length > 0
       label_language: true,
     )
     pull_request = pr_creator.create
+
+    pull_requests = client.pull_requests($repo_name, :state => 'open')
+
+    matching_pr = pull_requests.find do |pr|
+      pr.title.include?(pr_name) || pr.body.include?(pr_name)
+    end
+
+    add_comments_pr(my_array_deps, my_updated_files, matching_pr.number, client)
+
   end
   puts "submitted"
 else
   puts "Nothing need to update."
+  pull_requests = client.pull_requests($repo_name, :state => 'open')
+
+  matching_pr = pull_requests.find do |pr|
+    pr.title.include?(pr_name) || pr.body.include?(pr_name)
+  end
+
+  if matching_pr
+    pr_number = matching_pr.number
+    puts "pr_number PR #{pr_number}"
+    close_pull_request(client,$repo_name, pr_number)
+  end
 end
 
 StackProf.stop if $options[:profile]
