@@ -886,7 +886,7 @@ if my_array_deps.length > 0
   pull_requests = client.pull_requests($repo_name, :state => 'open')
 
   matching_pr = pull_requests.find do |pr|
-    pr.title.include?(pr_name) || pr.body.include?(pr_name)
+    pr.title.include?(pr_name)
   end
 
   if matching_pr
@@ -947,7 +947,7 @@ if my_array_deps.length > 0
     pull_requests = client.pull_requests($repo_name, :state => 'open')
 
     matching_pr = pull_requests.find do |pr|
-      pr.title.include?(pr_name) || pr.body.include?(pr_name)
+      pr.title.include?(pr_name)
     end
 
     add_comments_pr(my_array_deps, my_updated_files, matching_pr.number, client)
@@ -959,7 +959,7 @@ else
   pull_requests = client.pull_requests($repo_name, :state => 'open')
 
   matching_pr = pull_requests.find do |pr|
-    pr.title.include?(pr_name) || pr.body.include?(pr_name)
+    pr.title.include?(pr_name)
   end
 
   if matching_pr
