@@ -79,6 +79,7 @@ Bundler.setup
 
 require "optparse"
 require "json"
+require 'yaml'
 require "debug"
 require "logger"
 require "dependabot/logger"
@@ -175,12 +176,16 @@ unless ENV["LOCAL_CONFIG_VARIABLES"].to_s.strip.empty?
 end
 
 unless ENV["SECURITY_ADVISORIES"].to_s.strip.empty?
+  file_path = './bin/dependabot-security.yaml'
+  yaml_content = File.read(file_path)
+  parsed_yaml = YAML.safe_load(yaml_content)
+  json_content = JSON.parse(parsed_yaml.to_json)
   # For example:
   # [{"dependency-name":"name",
   #   "patched-versions":[],
   #   "unaffected-versions":[],
   #   "affected-versions":["< 0.10.0"]}]
-  $options[:security_advisories].concat(JSON.parse(ENV.fetch("SECURITY_ADVISORIES", nil)))
+  $options[:security_advisories].concat(json_content["updates"][0]["security-advisories"])
 end
 
 unless ENV["IGNORE_CONDITIONS"].to_s.strip.empty?
@@ -791,17 +796,6 @@ rescue StandardError => e
 
   puts " => handled error whilst updating #{dep.name}: #{error_details.fetch(:"error-type")} " \
        "#{error_details.fetch(:"error-detail")}"
-end
-
-def truncate_string(input_string)
-  max_length = 65536
-  if input_string.length > max_length
-    truncated_string = input_string[0, max_length]
-    puts "String was too long and has been truncated."
-    truncated_string
-  else
-    input_string
-  end
 end
 
 def add_comments_pr(dependencies, my_updated_files, pr_number, client)
