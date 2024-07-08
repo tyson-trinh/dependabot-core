@@ -654,6 +654,14 @@ puts "=> updating #{dependencies.count} dependencies: #{dependencies.map(&:name)
 my_array_deps = []
 my_updated_files = nil
 checker_count = 0
+
+dependencies.each do |dep|
+    $options[:ignore_conditions] <<  {
+              "dependency-name" => "#{dep.name}",
+              "update-types" => ["version-update:semver-major","version-update:semver-minor"]
+            }
+end
+
 dependencies.each do |dep|
   checker_count += 1
   checker = update_checker_for(dep)
