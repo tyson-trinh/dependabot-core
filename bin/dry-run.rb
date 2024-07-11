@@ -80,6 +80,7 @@ Bundler.setup
 require "optparse"
 require "json"
 require 'yaml'
+require 'uri'
 require "debug"
 require "logger"
 require "dependabot/logger"
@@ -573,7 +574,7 @@ def update_checker_for(dependency)
     repo_contents_path: $repo_contents_path,
     requirements_update_strategy: $options[:requirements_update_strategy],
     ignored_versions: ignored_versions_for(dependency),
-    security_advisories: security_advisories,
+    security_advisories: security_advisories(dependency),
     options: $options[:updater_options]
   )
 end
@@ -594,7 +595,37 @@ def ignored_versions_for(dep)
   end
 end
 
-def security_advisories
+def security_advisories(dependency)
+  security_client =  Octokit::Client.new(:access_token => ENV.fetch("LOCAL_GITHUB_ACCESS_TOKEN", nil))
+
+  headers = {
+    'Accept' => 'application/vnd.github.v3+json',
+    'X-GitHub-Api-Version': '2022-11-28'
+  }
+
+  params = {
+    "ecosystem" => "maven",
+    "affects" => dependency.version ? "#{dependency.name}@#{dependency.version}" : "#{dependency.name}",
+  }
+
+  query_string = URI.encode_www_form(params)
+  puts query_string
+  puts "/advisories?#{query_string}"
+  response_advisories = security_client.get( "/advisories?#{query_string}")
+
+  $options[:security_advisories] = []
+
+  for advisory in response_advisories
+    for vulnerability in advisory["vulnerabilities"]
+      $options[:security_advisories].concat([{
+        "affected-versions" => [vulnerability["vulnerable_version_range"]],
+        "patched-versions" => [vulnerability["first_patched_version"]],
+        "unaffected-versions"=> [],
+        "dependency-name" => dependency.name
+      }])
+    end
+  end
+
   $options[:security_advisories].map do |adv|
     vulnerable_versions = adv["affected-versions"] || []
     safe_versions = (adv["patched-versions"] || []) +
@@ -643,23 +674,24 @@ def file_updater_for(dependencies)
 end
 
 def security_fix?(dependency)
-  security_advisories.any? do |advisory|
+  security_advisories(dependency).any? do |advisory|
     advisory.fixed_by?(dependency)
   end
 end
 
 puts "=> updating #{dependencies.count} dependencies: #{dependencies.map(&:name).join(', ')}"
-
 # rubocop:disable Metrics/BlockLength
 my_array_deps = []
 my_updated_files = nil
 checker_count = 0
 
-dependencies.each do |dep|
+if(!$options[:security_updates_only])
+  dependencies.each do |dep|
     $options[:ignore_conditions] <<  {
-              "dependency-name" => "#{dep.name}",
-              "update-types" => ["version-update:semver-major","version-update:semver-minor"]
-            }
+      "dependency-name" => "#{dep.name}",
+      "update-types" => ["version-update:semver-major","version-update:semver-minor"]
+    }
+  end
 end
 
 dependencies.each do |dep|
@@ -743,19 +775,20 @@ dependencies.each do |dep|
     next
   end
 
-  if $options[:security_updates_only] &&
-     updated_deps.none? { |d| security_fix?(d) }
-    puts "    (updated version is still vulnerable 🚨)"
-    log_conflicting_dependencies(checker.conflicting_dependencies)
-    next
-  end
+  # if $options[:security_updates_only] &&
+  #   updated_deps.none? { |d| security_fix?(d) }
+  #   puts "    (updated version is still vulnerable 🚨)"
+  #   log_conflicting_dependencies(checker.conflicting_dependencies)
+  #   next
+  # end
 
   # Removal is only supported for transitive dependencies which are removed as a
   # side effect of the parent update
   deps_to_update = updated_deps.reject(&:removed?)
   my_array_deps.push(updated_deps[0])
+  deps_reference = $options[:security_updates_only] ? updated_deps : my_array_deps
 
-  updater = file_updater_for(my_array_deps)
+  updater = file_updater_for(deps_reference)
   updated_files = updater.updated_dependency_files
   my_updated_files = updated_files
 
@@ -764,6 +797,48 @@ dependencies.each do |dep|
     next true if d.top_level? && d.requirements == d.previous_requirements
 
     d.version == d.previous_version
+  end
+
+  begin
+    if $options[:security_updates_only]
+      msg = Dependabot::PullRequestCreator::MessageBuilder.new(
+        dependencies: updated_deps,
+        files: updated_files,
+        credentials: $options[:credentials],
+        source: $source,
+        commit_message_options: $update_config.commit_message_options.to_h,
+        github_redirection_service: Dependabot::PullRequestCreator::DEFAULT_GITHUB_REDIRECTION_SERVICE
+      ).message
+
+      custom_message = Dependabot::PullRequestCreator::Message.new(
+        pr_name: "Security Update ##{msg.pr_name}",
+        pr_message: msg.pr_message,
+        commit_message: msg.commit_message
+      )
+
+      # puts "updated_files => #{updated_files}"
+
+      assignee = (ENV["PULL_REQUESTS_ASSIGNEE"] || ENV["GITLAB_ASSIGNEE_ID"])&.to_i
+      assignees = assignee ? [assignee] : assignee
+      pr_creator = Dependabot::PullRequestCreator.new(
+        source: $source,
+        base_commit: $commit,
+        dependencies: updated_deps,
+        files: updated_files,
+        message: custom_message,
+        credentials:  $options[:credentials],
+        assignees: assignees,
+        author_details: { name: "Dependabot", email: "no-reply@github.com" },
+        label_language: true,
+      )
+      pull_request = pr_creator.create
+
+      puts "Pull request submitted"
+    end
+  rescue StandardError => e
+    puts "An error occurred: #{e.message}"
+  ensure
+    puts "Process completed."
   end
 
   if $options[:write]
@@ -861,13 +936,14 @@ def close_pull_request(client, repo, pull_request_number)
   puts "Closed pull request ##{pull_request_number}"
 end
 
+if $options[:security_updates_only]
+  puts "Submited Security Update"
+  return
+end
+
 client = Octokit::Client.new(:access_token => ENV.fetch("LOCAL_GITHUB_ACCESS_TOKEN", nil))
 
 pr_name = "Dependencies - Version Update"
-
-if $options[:security_updates_only] == true
-  pr_name = "Dependencies - Security Update"
-end
 
 if my_array_deps.length > 0
   msg = Dependabot::PullRequestCreator::MessageBuilder.new(
