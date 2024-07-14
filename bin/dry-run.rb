@@ -596,33 +596,35 @@ def ignored_versions_for(dep)
 end
 
 def security_advisories(dependency)
-  security_client =  Octokit::Client.new(:access_token => ENV.fetch("LOCAL_GITHUB_ACCESS_TOKEN", nil))
-
-  headers = {
-    'Accept' => 'application/vnd.github.v3+json',
-    'X-GitHub-Api-Version': '2022-11-28'
-  }
-
-  params = {
-    "ecosystem" => "maven",
-    "affects" => dependency.version ? "#{dependency.name}@#{dependency.version}" : "#{dependency.name}",
-  }
-
-  query_string = URI.encode_www_form(params)
-  puts query_string
-  puts "/advisories?#{query_string}"
-  response_advisories = security_client.get( "/advisories?#{query_string}")
-
   $options[:security_advisories] = []
 
-  for advisory in response_advisories
-    for vulnerability in advisory["vulnerabilities"]
-      $options[:security_advisories].concat([{
-        "affected-versions" => [vulnerability["vulnerable_version_range"]],
-        "patched-versions" => [vulnerability["first_patched_version"]],
-        "unaffected-versions"=> [],
-        "dependency-name" => dependency.name
-      }])
+  if($options[:security_updates_only])
+    security_client =  Octokit::Client.new(:access_token => ENV.fetch("LOCAL_GITHUB_ACCESS_TOKEN", nil))
+
+    headers = {
+      'Accept' => 'application/vnd.github.v3+json',
+      'X-GitHub-Api-Version': '2022-11-28'
+    }
+
+    params = {
+      "ecosystem" => "maven",
+      "affects" => dependency.version ? "#{dependency.name}@#{dependency.version}" : "#{dependency.name}",
+    }
+
+    query_string = URI.encode_www_form(params)
+    puts query_string
+    puts "/advisories?#{query_string}"
+    response_advisories = security_client.get( "/advisories?#{query_string}")
+
+    for advisory in response_advisories
+      for vulnerability in advisory["vulnerabilities"]
+        $options[:security_advisories].concat([{
+          "affected-versions" => [vulnerability["vulnerable_version_range"]],
+          "patched-versions" => [vulnerability["first_patched_version"]],
+          "unaffected-versions"=> [],
+          "dependency-name" => dependency.name
+        }])
+      end
     end
   end
 
