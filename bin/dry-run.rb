@@ -619,7 +619,7 @@ def security_advisories(dependency)
     for advisory in response_advisories
       for vulnerability in advisory["vulnerabilities"]
         $options[:security_advisories].concat([{
-          "affected-versions" => vulnerability["vulnerable_version_range"] ? [vulnerability["vulnerable_version_range"]] || [],
+          "affected-versions" => vulnerability["vulnerable_version_range"] ? [vulnerability["vulnerable_version_range"]] : [],
           "patched-versions" => vulnerability["first_patched_version"] ? [vulnerability["first_patched_version"]] : [],
           "unaffected-versions"=> [],
           "dependency-name" => dependency.name
