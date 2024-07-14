@@ -966,7 +966,7 @@ if my_array_deps.length > 0
   pull_requests = client.pull_requests($repo_name, :state => 'open')
 
   matching_pr = pull_requests.find do |pr|
-    pr.title.include?(pr_name)
+    pr.title.include?(pr_name) && pr.base.ref == $options[:branch]
   end
 
   if matching_pr
@@ -1008,7 +1008,7 @@ if my_array_deps.length > 0
     puts "head_commit_sha PR #{head_commit_sha}"
     update_commit_message(client,  $repo_name, branch_name, head_commit_sha, msg.commit_message)
   else
-    puts "No open pull request found with the message '#{pr_name}'"
+    puts "No open pull request found with the message '#{pr_name}' with branch #{$options[:branch]}"
     assignee = (ENV["PULL_REQUESTS_ASSIGNEE"] || ENV["GITLAB_ASSIGNEE_ID"])&.to_i
     assignees = assignee ? [assignee] : assignee
     pr_creator = Dependabot::PullRequestCreator.new(
@@ -1027,7 +1027,7 @@ if my_array_deps.length > 0
     pull_requests = client.pull_requests($repo_name, :state => 'open')
 
     matching_pr = pull_requests.find do |pr|
-      pr.title.include?(pr_name)
+      pr.title.include?(pr_name) && pr.base.ref == $options[:branch]
     end
 
     add_comments_pr(my_array_deps, my_updated_files, matching_pr.number, client)
@@ -1039,7 +1039,7 @@ else
   pull_requests = client.pull_requests($repo_name, :state => 'open')
 
   matching_pr = pull_requests.find do |pr|
-    pr.title.include?(pr_name)
+    pr.title.include?(pr_name) && pr.base.ref == $options[:branch]
   end
 
   if matching_pr
