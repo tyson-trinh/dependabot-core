@@ -612,14 +612,13 @@ def security_advisories(dependency)
     }
 
     query_string = URI.encode_www_form(params)
-    puts query_string
     puts "/advisories?#{query_string}"
     response_advisories = security_client.get( "/advisories?#{query_string}")
 
     for advisory in response_advisories
       for vulnerability in advisory["vulnerabilities"]
         $options[:security_advisories].concat([{
-          "affected-versions" => vulnerability["vulnerable_version_range"] ? [vulnerability["vulnerable_version_range"]] : [],
+          "affected-versions" => [vulnerability["vulnerable_version_range"]],
           "patched-versions" => vulnerability["first_patched_version"] ? [vulnerability["first_patched_version"]] : [],
           "unaffected-versions"=> [],
           "dependency-name" => dependency.name
@@ -788,9 +787,8 @@ dependencies.each do |dep|
   # side effect of the parent update
   deps_to_update = updated_deps.reject(&:removed?)
   my_array_deps.push(updated_deps[0])
-  deps_reference = $options[:security_updates_only] ? updated_deps : my_array_deps
 
-  updater = file_updater_for(deps_reference)
+  updater = file_updater_for(my_array_deps)
   updated_files = updater.updated_dependency_files
   my_updated_files = updated_files
 
@@ -799,48 +797,6 @@ dependencies.each do |dep|
     next true if d.top_level? && d.requirements == d.previous_requirements
 
     d.version == d.previous_version
-  end
-
-  begin
-    if $options[:security_updates_only]
-      msg = Dependabot::PullRequestCreator::MessageBuilder.new(
-        dependencies: updated_deps,
-        files: updated_files,
-        credentials: $options[:credentials],
-        source: $source,
-        commit_message_options: $update_config.commit_message_options.to_h,
-        github_redirection_service: Dependabot::PullRequestCreator::DEFAULT_GITHUB_REDIRECTION_SERVICE
-      ).message
-
-      custom_message = Dependabot::PullRequestCreator::Message.new(
-        pr_name: "Security Update ##{msg.pr_name}",
-        pr_message: msg.pr_message,
-        commit_message: msg.commit_message
-      )
-
-      # puts "updated_files => #{updated_files}"
-
-      assignee = (ENV["PULL_REQUESTS_ASSIGNEE"] || ENV["GITLAB_ASSIGNEE_ID"])&.to_i
-      assignees = assignee ? [assignee] : assignee
-      pr_creator = Dependabot::PullRequestCreator.new(
-        source: $source,
-        base_commit: $commit,
-        dependencies: updated_deps,
-        files: updated_files,
-        message: custom_message,
-        credentials:  $options[:credentials],
-        assignees: assignees,
-        author_details: { name: "Dependabot", email: "no-reply@github.com" },
-        label_language: true,
-      )
-      pull_request = pr_creator.create
-
-      puts "Pull request submitted"
-    end
-  rescue StandardError => e
-    puts "An error occurred: #{e.message}"
-  ensure
-    puts "Process completed."
   end
 
   if $options[:write]
@@ -938,14 +894,13 @@ def close_pull_request(client, repo, pull_request_number)
   puts "Closed pull request ##{pull_request_number}"
 end
 
-if $options[:security_updates_only]
-  puts "Submited Security Update"
-  return
-end
-
 client = Octokit::Client.new(:access_token => ENV.fetch("LOCAL_GITHUB_ACCESS_TOKEN", nil))
 
 pr_name = "Dependencies - Version Update"
+
+if $options[:security_updates_only]
+  pr_name = "Dependencies - Security Update"
+end
 
 if my_array_deps.length > 0
   msg = Dependabot::PullRequestCreator::MessageBuilder.new(
@@ -958,7 +913,7 @@ if my_array_deps.length > 0
   ).message
 
   custom_message = Dependabot::PullRequestCreator::Message.new(
-    pr_name: pr_name,
+    pr_name: "#{pr_name} for branch #{$options[:branch]}",
     pr_message: "",
     commit_message: msg.commit_message
   )
