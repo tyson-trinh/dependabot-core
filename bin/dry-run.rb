@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-# typed: true
+# typed: false
 # frozen_string_literal: true
 
 # This script executes a full update run for a given repo (optionally for a
@@ -79,10 +79,13 @@ Bundler.setup
 
 require "optparse"
 require "json"
+require 'yaml'
+require 'uri'
 require "debug"
 require "logger"
 require "dependabot/logger"
 require "stackprof"
+require 'octokit'
 
 Dependabot.logger = Logger.new($stdout)
 
@@ -94,6 +97,7 @@ require "dependabot/file_updaters"
 require "dependabot/pull_request_creator"
 require "dependabot/config/file_fetcher"
 require "dependabot/simple_instrumentor"
+require "dependabot/pull_request_updater"
 
 require "dependabot/bundler"
 require "dependabot/cargo"
@@ -173,12 +177,16 @@ unless ENV["LOCAL_CONFIG_VARIABLES"].to_s.strip.empty?
 end
 
 unless ENV["SECURITY_ADVISORIES"].to_s.strip.empty?
+  file_path = './bin/dependabot-security.yaml'
+  yaml_content = File.read(file_path)
+  parsed_yaml = YAML.safe_load(yaml_content)
+  json_content = JSON.parse(parsed_yaml.to_json)
   # For example:
   # [{"dependency-name":"name",
   #   "patched-versions":[],
   #   "unaffected-versions":[],
   #   "affected-versions":["< 0.10.0"]}]
-  $options[:security_advisories].concat(JSON.parse(ENV.fetch("SECURITY_ADVISORIES", nil)))
+  $options[:security_advisories].concat(json_content["updates"][0]["security-advisories"])
 end
 
 unless ENV["IGNORE_CONDITIONS"].to_s.strip.empty?
@@ -504,6 +512,7 @@ $update_config = $config_file.update_config(
 )
 
 fetcher = Dependabot::FileFetchers.for_package_manager($package_manager).new(**fetcher_args)
+$commit = fetcher.commit
 $files = fetch_files(fetcher)
 return if $files.empty?
 
@@ -530,15 +539,42 @@ else
   end
 end
 
+version_update_hash = {
+  "name" => "version-updates",
+  "rules" => {
+    "patterns" => ["*"],
+    "update-types" => ["minor", "patch"]
+  },
+  "applies-to" => "version-updates"
+}
+
+security_update_hash = {
+  "name" => "security-updates",
+  "rules" => {
+    "patterns" => ["*"],
+    "update-types" => ["patch"]
+  },
+  "applies-to" => "security-updates"
+}
+
+hash = version_update_hash
+
+if $options[:security_updates_only] == true
+  hash = security_update_hash
+end
+
+$group = Dependabot::DependencyGroup.new(name: hash["name"], rules: hash["rules"], applies_to: hash["applies-to"])
+
 def update_checker_for(dependency)
   Dependabot::UpdateCheckers.for_package_manager($package_manager).new(
     dependency: dependency,
     dependency_files: $files,
+    dependency_group: $group,
     credentials: $options[:credentials],
     repo_contents_path: $repo_contents_path,
     requirements_update_strategy: $options[:requirements_update_strategy],
     ignored_versions: ignored_versions_for(dependency),
-    security_advisories: security_advisories,
+    security_advisories: security_advisories(dependency),
     options: $options[:updater_options]
   )
 end
@@ -559,7 +595,38 @@ def ignored_versions_for(dep)
   end
 end
 
-def security_advisories
+def security_advisories(dependency)
+  $options[:security_advisories] = []
+
+  if($options[:security_updates_only])
+    security_client =  Octokit::Client.new(:access_token => ENV.fetch("LOCAL_GITHUB_ACCESS_TOKEN", nil))
+
+    headers = {
+      'Accept' => 'application/vnd.github.v3+json',
+      'X-GitHub-Api-Version': '2022-11-28'
+    }
+
+    params = {
+      "ecosystem" => "maven",
+      "affects" => dependency.version ? "#{dependency.name}@#{dependency.version}" : "#{dependency.name}",
+    }
+
+    query_string = URI.encode_www_form(params)
+    puts "/advisories?#{query_string}"
+    response_advisories = security_client.get( "/advisories?#{query_string}")
+
+    for advisory in response_advisories
+      for vulnerability in advisory["vulnerabilities"]
+        $options[:security_advisories].concat([{
+          "affected-versions" => [vulnerability["vulnerable_version_range"]],
+          "patched-versions" => vulnerability["first_patched_version"] ? [vulnerability["first_patched_version"]] : [],
+          "unaffected-versions"=> [],
+          "dependency-name" => dependency.name
+        }])
+      end
+    end
+  end
+
   $options[:security_advisories].map do |adv|
     vulnerable_versions = adv["affected-versions"] || []
     safe_versions = (adv["patched-versions"] || []) +
@@ -608,15 +675,26 @@ def file_updater_for(dependencies)
 end
 
 def security_fix?(dependency)
-  security_advisories.any? do |advisory|
+  security_advisories(dependency).any? do |advisory|
     advisory.fixed_by?(dependency)
   end
 end
 
 puts "=> updating #{dependencies.count} dependencies: #{dependencies.map(&:name).join(', ')}"
-
 # rubocop:disable Metrics/BlockLength
+my_array_deps = []
+my_updated_files = nil
 checker_count = 0
+
+if(!$options[:security_updates_only])
+  dependencies.each do |dep|
+    $options[:ignore_conditions] <<  {
+      "dependency-name" => "#{dep.name}",
+      "update-types" => ["version-update:semver-major","version-update:semver-minor"]
+    }
+  end
+end
+
 dependencies.each do |dep|
   checker_count += 1
   checker = update_checker_for(dep)
@@ -698,18 +776,21 @@ dependencies.each do |dep|
     next
   end
 
-  if $options[:security_updates_only] &&
-     updated_deps.none? { |d| security_fix?(d) }
-    puts "    (updated version is still vulnerable 🚨)"
-    log_conflicting_dependencies(checker.conflicting_dependencies)
-    next
-  end
+  # if $options[:security_updates_only] &&
+  #   updated_deps.none? { |d| security_fix?(d) }
+  #   puts "    (updated version is still vulnerable 🚨)"
+  #   log_conflicting_dependencies(checker.conflicting_dependencies)
+  #   next
+  # end
 
   # Removal is only supported for transitive dependencies which are removed as a
   # side effect of the parent update
   deps_to_update = updated_deps.reject(&:removed?)
-  updater = file_updater_for(deps_to_update)
+  my_array_deps.push(updated_deps[0])
+
+  updater = file_updater_for(my_array_deps)
   updated_files = updater.updated_dependency_files
+  my_updated_files = updated_files
 
   updated_deps = updated_deps.reject do |d|
     next false if d.name == checker.dependency.name
@@ -717,17 +798,6 @@ dependencies.each do |dep|
 
     d.version == d.previous_version
   end
-
-  msg = Dependabot::PullRequestCreator::MessageBuilder.new(
-    dependencies: updated_deps,
-    files: updated_files,
-    credentials: $options[:credentials],
-    source: $source,
-    commit_message_options: $update_config.commit_message_options.to_h,
-    github_redirection_service: Dependabot::PullRequestCreator::DEFAULT_GITHUB_REDIRECTION_SERVICE
-  ).message
-
-  puts " => #{msg.pr_name.downcase}"
 
   if $options[:write]
     updated_files.each do |updated_file|
@@ -767,6 +837,171 @@ rescue StandardError => e
 
   puts " => handled error whilst updating #{dep.name}: #{error_details.fetch(:"error-type")} " \
        "#{error_details.fetch(:"error-detail")}"
+end
+
+def add_comments_pr(dependencies, my_updated_files, pr_number, client)
+  dependencies.each do |dep|
+    msg = Dependabot::PullRequestCreator::MessageBuilder.new(
+      dependencies: [dep],
+      files: my_updated_files,
+      credentials: $options[:credentials],
+      source: $source,
+      commit_message_options: $update_config.commit_message_options.to_h,
+      github_redirection_service: Dependabot::PullRequestCreator::DEFAULT_GITHUB_REDIRECTION_SERVICE
+    ).message
+
+    puts " => #{msg}"
+
+    client.add_comment($repo_name, pr_number, msg.pr_message)
+  end
+end
+
+def get_all_comments(client, repo, pr_number)
+  comments = client.issue_comments(repo, pr_number)
+  comments
+end
+
+def delete_comments_starting_with_bumps(client, repo, pr_number)
+  comments = get_all_comments(client, repo, pr_number)
+  comments.each do |comment|
+    if comment.body.start_with?('Bumps')
+      client.delete_comment(repo, comment.id)
+      puts "Deleted comment: #{comment.id}"
+    end
+  end
+end
+
+def update_commit_message(client, repo, branch, commit_sha, new_message)
+  puts "new msg - #{new_message}"
+  # Get the commit object
+  commit = client.commit(repo, commit_sha)
+
+  # Get the tree SHA and parent SHAs from the original commit
+  tree_sha = commit.commit.tree.sha
+  parent_shas = commit.parents.map(&:sha)
+
+  # Create a new commit with the same tree and parents but with the updated message
+  new_commit = client.create_commit(repo, new_message, tree_sha, parent_shas)
+
+  # Update the branch to point to the new commit
+  client.update_ref(repo, "heads/#{branch}", new_commit.sha, true)
+
+  puts "Updated commit message: #{new_commit.sha}"
+end
+
+def close_pull_request(client, repo, pull_request_number)
+  client.update_pull_request(repo, pull_request_number, state: 'closed')
+  puts "Closed pull request ##{pull_request_number}"
+end
+
+client = Octokit::Client.new(:access_token => ENV.fetch("LOCAL_GITHUB_ACCESS_TOKEN", nil))
+
+pr_name = "Dependencies - Version Update"
+
+if $options[:security_updates_only]
+  pr_name = "Dependencies - Security Update"
+end
+
+if my_array_deps.length > 0
+  msg = Dependabot::PullRequestCreator::MessageBuilder.new(
+    dependencies: my_array_deps,
+    files: my_updated_files,
+    credentials: $options[:credentials],
+    source: $source,
+    commit_message_options: $update_config.commit_message_options.to_h,
+    github_redirection_service: Dependabot::PullRequestCreator::DEFAULT_GITHUB_REDIRECTION_SERVICE
+  ).message
+
+  custom_message = Dependabot::PullRequestCreator::Message.new(
+    pr_name: "#{pr_name} for branch #{$options[:branch]}",
+    pr_message: "",
+    commit_message: msg.commit_message
+  )
+
+  pull_requests = client.pull_requests($repo_name, :state => 'open')
+
+  matching_pr = pull_requests.find do |pr|
+    pr.title.include?(pr_name) && pr.base.ref == $options[:branch]
+  end
+
+  if matching_pr
+    # Get the head branch of the matching pull request
+    puts "Matching PR #{matching_pr}"
+    branch_name = matching_pr.head.ref
+    puts "branch_name PR #{branch_name}"
+    pr_number = matching_pr.number
+    puts "pr_number PR #{pr_number}"
+    branch = client.branch($repo_name, branch_name)
+    puts "branch PR #{branch}"
+    head_commit_sha = branch.commit.sha
+    puts "head_commit_sha PR #{head_commit_sha}"
+    base_branch = $options[:branch] || "main"
+    puts "base branch PR #{base_branch}"
+    base_ = $options[:branch] || "main"
+    puts "commit PR #{$commit}"
+    puts "The head branch of the pull request with the message '#{pr_name}' is: #{branch_name}"
+    pr_updater = Dependabot::PullRequestUpdater.new(
+      source: $source,
+      base_commit: $commit,
+      old_commit: head_commit_sha,
+      files: my_updated_files,
+      credentials: $options[:credentials],
+      pull_request_number: pr_number,
+      author_details: {
+        email: "support@dependabot.com",
+        name: "dependabot"
+      }
+    )
+
+    pr_updater.update
+    delete_comments_starting_with_bumps(client, $repo_name, pr_number)
+    add_comments_pr(my_array_deps, my_updated_files, pr_number, client)
+
+    branch = client.branch($repo_name, branch_name)
+    puts "branch PR #{branch}"
+    head_commit_sha = branch.commit.sha
+    puts "head_commit_sha PR #{head_commit_sha}"
+    update_commit_message(client,  $repo_name, branch_name, head_commit_sha, msg.commit_message)
+  else
+    puts "No open pull request found with the message '#{pr_name}' with branch #{$options[:branch]}"
+    assignee = (ENV["PULL_REQUESTS_ASSIGNEE"] || ENV["GITLAB_ASSIGNEE_ID"])&.to_i
+    assignees = assignee ? [assignee] : assignee
+    pr_creator = Dependabot::PullRequestCreator.new(
+      source: $source,
+      base_commit: $commit,
+      dependencies: my_array_deps,
+      files: my_updated_files,
+      message: custom_message,
+      credentials:  $options[:credentials],
+      assignees: assignees,
+      author_details: { name: "Dependabot", email: "no-reply@github.com" },
+      label_language: true,
+    )
+    pull_request = pr_creator.create
+
+    pull_requests = client.pull_requests($repo_name, :state => 'open')
+
+    matching_pr = pull_requests.find do |pr|
+      pr.title.include?(pr_name) && pr.base.ref == $options[:branch]
+    end
+
+    add_comments_pr(my_array_deps, my_updated_files, matching_pr.number, client)
+
+  end
+  puts "submitted"
+else
+  puts "Nothing need to update."
+  pull_requests = client.pull_requests($repo_name, :state => 'open')
+
+  matching_pr = pull_requests.find do |pr|
+    pr.title.include?(pr_name) && pr.base.ref == $options[:branch]
+  end
+
+  if matching_pr
+    pr_number = matching_pr.number
+    puts "pr_number PR #{pr_number}"
+    close_pull_request(client,$repo_name, pr_number)
+  end
 end
 
 StackProf.stop if $options[:profile]
